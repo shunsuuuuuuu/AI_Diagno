@@ -1,0 +1,175 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Fri Feb 28 12:55:54 2020
+
+@author: kimurashu
+"""
+
+import pandas as pd
+import numpy as np
+import networkx as nx
+import matplotlib.pyplot as plt
+import os
+
+dir_path = 'Data_concatenate' #
+os.makedirs(dir_path, exist_ok=True)
+
+#Formatting data
+work_hist_data = pd.read_csv("SQSES_作業履歴データ_train.csv") #index_col はindexとなる列を指定
+recept_data = pd.read_csv("SQSES_受付データ_train.csv")
+alart_report = pd.read_csv("AN_異常発報履歴.csv")
+
+#operation_data_2014_Q1 = pd.read_csv("AN_282\AN_282_IN_FY2014_1Q.csv")
+#UniCode_list = (operation_data_2014_Q1.loc[:,"UNIT_ID"].unique()).tolist()
+
+join_data = pd.merge(work_hist_data,recept_data,left_on=["受付年","管理No"], right_on=["受付年","管理No"],how="left")
+join_data = pd.merge(join_data,alart_report,left_on=["発報No"], right_on=["REPMALFUNC_ID"],how="left")
+
+
+join_data = join_data.drop("REPMALFUNC_ID", axis=1) #発報IDがあるので除去
+join_data_IN = join_data["IN_UNIT_ID"].fillna(-1) #IN_UNIT_IDの nullをー１に変換
+join_data["IN_UNIT_ID"] = join_data_IN #除去した列をIN_UNIT_IDに置き換える。
+
+join_data_ini = join_data.copy()
+
+#欠損地除去
+rows_to_drop = join_data.index[join_data["進捗コード"] == "C"] #ご依頼元よりキャンセル
+#join_data = join_data[join_data['進捗コード'] != "C"]
+join_data = join_data.drop(rows_to_drop)
+rows_to_drop = join_data.index[join_data["進捗コード"] == "E"] #その他キャンセル
+join_data = join_data.drop(rows_to_drop)
+rows_to_drop = join_data.index[join_data["進捗コード"] == "F"] #ダブり取り消し
+join_data = join_data.drop(rows_to_drop)
+rows_to_drop = join_data.index[join_data["管理No"] == "T22Z6359"] #出動回数多すぎ案件
+join_data = join_data.drop(rows_to_drop)
+rows_to_drop = join_data.index[join_data["箇所コード"] == 0] #該当項目なしの無駄データ
+join_data = join_data.drop(rows_to_drop)
+rows_to_drop = join_data.index[join_data["IN_UNIT_ID"] == -1] #室外機故障のデータ
+join_data = join_data.drop(rows_to_drop)
+
+join_data = join_data.dropna(how='any')
+print( join_data.isnull().sum() )
+plt.hist(join_data["出動回数"])
+plt.show()
+
+#join_dataの列を絞る
+join_data = join_data.sort_values(["管理No","受付日"])
+join_data = join_data.reset_index()
+join_data_res = join_data.copy()
+join_data_r = join_data.copy()
+join_data = join_data[['管理No', '出動回数', '箇所コード', '箇所（名称）', '状況コード', '状況（名称）',
+       '進捗コード', '進捗（名称）', '作業内容', '受付日','REPORT_DT', '最終作業日', '発報No',
+       'MODEL_CD','UNIT_ID', 'IN_UNIT_ID']]
+join_data_res = join_data_res[['管理No', '出動回数', '箇所コード', '箇所（名称）', '状況コード', '状況（名称）',
+       '進捗コード', '進捗（名称）', '作業内容', '受付日','REPORT_DT', '最終作業日', '発報No',
+       'MODEL_CD', 'UNIT_ID','IN_UNIT_ID']]
+
+#REPoRT_DTを形式化
+join_data["datetime"] = pd.to_datetime(join_data["REPORT_DT"])
+list_temp = []
+for i in range(len(join_data.index)):
+    date_list=[join_data["datetime"][i].year,join_data["datetime"][i].month,
+               join_data["datetime"][i].day,join_data["datetime"][i].hour]
+    list_temp.append(date_list)
+join_data["datetime"] = list_temp
+
+#fileName_TimeSeries = []
+#for i in range(len(join_data.index)):
+#    fileName_TimeSeries.append( "QuarterData\AN_282_IN_FY2014_1Q.csv" +str(join_data["IN_UNIT_ID"].iloc[i]) +".csv" )
+#join_data["fileName"] = fileName_TimeSeries
+
+
+fileName_TimeSeries = []
+fileName_TimeSeries_back = []
+for i in range(len(join_data.index)):
+    if 1 <= join_data["datetime"][i][1] and join_data["datetime"][i][1] <= 3:
+        name = str('Quarter_DATA/train_'+str(int(join_data["MODEL_CD"][i]))+'_'+str(int(join_data["datetime"][i][0]-1))+'_4Q_'+str(int(join_data["IN_UNIT_ID"][i]))+'.csv')
+        fileName_TimeSeries.append(name)
+        name = str('Quarter_DATA/train_'+str(int(join_data["MODEL_CD"][i]))+'_'+str(int(join_data["datetime"][i][0]-1))+'_3Q_'+str(int(join_data["IN_UNIT_ID"][i]))+'.csv')
+        fileName_TimeSeries_back.append(name)
+
+    elif 4 <= join_data["datetime"][i][1] and join_data["datetime"][i][1] <= 6:
+        name = str('Quarter_DATA/train_'+str(int(join_data["MODEL_CD"][i]))+'_'+str(int(join_data["datetime"][i][0]))+'_1Q_'+str(int(join_data["IN_UNIT_ID"][i]))+'.csv')
+        fileName_TimeSeries.append(name)
+        name = str('Quarter_DATA/train_'+str(int(join_data["MODEL_CD"][i]))+'_'+str(int(join_data["datetime"][i][0]-1))+'_4Q_'+str(int(join_data["IN_UNIT_ID"][i]))+'.csv')
+        fileName_TimeSeries_back.append(name)        
+
+    elif 7 <= join_data["datetime"][i][1] and join_data["datetime"][i][1] <= 9:
+        name = str('Quarter_DATA/train_'+str(int(join_data["MODEL_CD"][i]))+'_'+str(int(join_data["datetime"][i][0]))+'_2Q_'+str(int(join_data["IN_UNIT_ID"][i]))+'.csv')
+        fileName_TimeSeries.append(name)
+        name = str('Quarter_DATA/train_'+str(int(join_data["MODEL_CD"][i]))+'_'+str(int(join_data["datetime"][i][0]))+'_1Q_'+str(int(join_data["IN_UNIT_ID"][i]))+'.csv')
+        fileName_TimeSeries_back.append(name)
+
+    elif 10 <= join_data["datetime"][i][1] and join_data["datetime"][i][1] <= 12:
+        name = str('Quarter_DATA/train_'+str(int(join_data["MODEL_CD"][i]))+'_'+str(int(join_data["datetime"][i][0]))+'_3Q_'+str(int(join_data["IN_UNIT_ID"][i]))+'.csv')
+        fileName_TimeSeries.append(name)
+        name = str('Quarter_DATA/train_'+str(int(join_data["MODEL_CD"][i]))+'_'+str(int(join_data["datetime"][i][0]))+'_2Q_'+str(int(join_data["IN_UNIT_ID"][i]))+'.csv')
+        fileName_TimeSeries_back.append(name)
+        
+join_data["fileName"] = fileName_TimeSeries
+join_data["fileName_back"] = fileName_TimeSeries_back
+
+join_data_valve = join_data[join_data["箇所コード"]==622]
+
+for i in range(len(join_data.index)):
+    print(i)
+    operation_df=pd.read_csv(join_data["fileName"][i])
+    operation_df_back=pd.read_csv(join_data["fileName_back"][i])
+
+flg=0
+i=0
+count=1
+data_num=len(join_data.index)-1
+for j in range(data_num):
+    print(i,i+count)
+    print(join_data_res["受付日"].iloc[i],join_data_res["受付日"].iloc[i+count])
+    print(join_data_res["管理No"].iloc[i],join_data_res["管理No"].iloc[i+count])
+    if ( join_data_res["管理No"].iloc[i]==join_data_res["管理No"].iloc[i+count] ) and (join_data_res["受付日"].iloc[i]==join_data_res["受付日"].iloc[i+count]):
+        join_data = join_data.drop(i+count)
+        count+=1
+    else:
+        print("----------------------------------------")
+        i+=count
+        count=1
+        
+join_data = join_data.sort_values(["受付日"])
+
+join_data_282 = join_data[join_data['MODEL_CD'] == 282]
+join_data_283 = join_data[join_data['MODEL_CD'] == 283]
+        
+join_data.to_csv("join_data.csv")
+join_data_282.to_csv("join_data_282.csv")
+join_data_283.to_csv("join_data_283.csv")
+
+
+
+
+
+
+
+#
+#thermo = join_data[ join_data.loc[:,"箇所（名称）"]=="サ－ミスタ" ]
+#plt.hist(thermo["出動回数"])
+#plt.show()
+#
+#valve = join_data[ join_data.loc[:,"箇所（名称）"]=="電子膨張弁" ]
+#plt.hist(valve["出動回数"])
+#plt.show()
+#
+#Heavy_tasks = join_data[ join_data.loc[:,"出動回数"] >=0 ]
+#plt.hist(Heavy_tasks["箇所コード"])
+#h=(Heavy_tasks["箇所（名称）"].value_counts().to_dict())
+#plt.show()
+
+#plt.figure(figsize=(12,16))
+#plt.scatter(valve["発報No"])
+#plt.show()
+#plt.scatter(valve["管理No"])
+#plt.show()
+
+
+#valve = valve.fillna(-1)
+#for i in range(len(valve.index)):
+#    valve["IN_UNIT_ID"].fillna(-1)
+#    if valve["IN_UNIT_ID"].iloc[i] == -1:
+#        valve["IN_UNIT_ID"].iloc[i] = 1
